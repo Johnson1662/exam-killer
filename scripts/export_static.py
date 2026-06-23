@@ -78,18 +78,19 @@ COURSE_INDEX = """\
   <button class="tab active" onclick="showTab('bank')">题库</button>
   <button class="tab" onclick="showTab('review')">复习指南</button>
 </div>
-<div id="tab-bank" class="tab-content">{bank_html}</div>
-<div id="tab-review" class="tab-content" style="display:none;">{review_html}</div>
 <script>
 var _questions = {questions_json};
 var _allChapters = {chapters_json};
 var _allTags = {tags_json};
 function showTab(name) {{
+  document.querySelectorAll('.tab-content').forEach(function(el) {{ el.style.display = 'none'; }});
   document.getElementById('tab-' + name).style.display = '';
   document.querySelectorAll('.tab').forEach(function(el) {{ el.classList.remove('active'); }});
   document.querySelector('.tab[onclick*=\"' + name + '\"]').classList.add('active');
 }}
-</script>"""
+</script>
+<div id="tab-bank" class="tab-content">{bank_html}</div>
+<div id="tab-review" class="tab-content" style="display:none;">{review_html}</div>"""
 
 # ── data reading ─────────────────────────────────────────────────────
 
