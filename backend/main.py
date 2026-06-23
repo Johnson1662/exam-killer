@@ -3,6 +3,7 @@
 import io
 import zipfile
 from pathlib import Path
+import logging
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
@@ -14,12 +15,18 @@ from backend.routes.files import router as files_router
 from backend.routes.questions import router as questions_router
 from backend.routes.review import router as review_router
 
+from backend.routes.llm_models import router as llm_models_router
 app = FastAPI(title="Exam-Killer", version="0.1.0")
 
 # ── Lifecycle ────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def startup():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     init_db()
 
 
@@ -28,6 +35,7 @@ async def startup():
 app.include_router(courses_router)
 app.include_router(files_router)
 app.include_router(questions_router)
+app.include_router(llm_models_router)
 app.include_router(review_router)
 
 # ── Client config ────────────────────────────────────────────────────

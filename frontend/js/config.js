@@ -41,19 +41,18 @@ const LEGACY_MODEL = 'exam_killer_llm_model';
 
 function getLLMConfig() {
   var mineru = localStorage.getItem('exam_killer_mineru_token');
-
-  // Try default provider's per-provider config first
   var providerId = getDefaultProvider();
   var cfg = getProviderConfig(providerId);
 
-  // Backward compat: if per-provider has no data, fall back to legacy globals
+  // Auto-migrate legacy globals to per-provider on first access
   if (!cfg.key && !cfg.endpoint) {
-    return {
-      llm_key: localStorage.getItem(LEGACY_KEY),
-      llm_endpoint: localStorage.getItem(LEGACY_EP),
-      llm_model: localStorage.getItem(LEGACY_MODEL),
-      mineru_token: mineru,
-    };
+    var legacyKey = localStorage.getItem(LEGACY_KEY);
+    var legacyEp = localStorage.getItem(LEGACY_EP);
+    var legacyModel = localStorage.getItem(LEGACY_MODEL);
+    if (legacyKey || legacyEp) {
+      setProviderConfig(providerId, { key: legacyKey, endpoint: legacyEp, model: legacyModel });
+      cfg = { key: legacyKey, endpoint: legacyEp, model: legacyModel };
+    }
   }
 
   return {

@@ -1,36 +1,29 @@
+# Generated static site
+_site/
+
 # Python
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 *.egg-info/
-dist/
-build/
-*.egg
-.venv/
 venv/
+.venv/
 
 # Environment
 .env
-.env.local
 
-# Database
-*.db
-*.db-shm
-*.db-wal
+# IDE
+.idea/
+.vscode/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# Large uploads (not needed for static export)
+data/uploads/
 
-# Generated data
-data/*/question_bank/
-data/*/raw/
-data/*/uploads/
-data/*/review-guide/
-data/*/_questions_export.md
+# Temporary extraction artifacts (output.md + content_list.js on)
+data/**/content_list.json
+data/**/_questions_export.md
+data/**/question_bank/

@@ -1,5 +1,7 @@
 import asyncio
 import uuid
+import json
+import logging
 
 from fastapi import APIRouter, HTTPException
 from typing import Optional
@@ -7,10 +9,10 @@ import re
 from backend.db import get_course
 from backend.config import DATA_DIR
 from backend.models import ReviewGenerateRequest
-from backend.sse import push_message
-from backend.llm import LLMProvider
-from backend.agent.core import Agent
+from backend.sse import push_message, push_event
+from backend.agent.pi_rpc import PiRpcAgent
 from backend.agent.prompts.review import OUTLINE_PROMPT, CHAPTER_PROMPT
+logger = logging.getLogger(__name__)
 
 
 def _parse_outline_lines(text: str) -> list[str]:
@@ -44,26 +46,34 @@ async def generate_review(course_id: int, body: ReviewGenerateRequest):
     if not all([body.llm_key, body.llm_endpoint, body.llm_model]):
         raise HTTPException(400, "llm_key, llm_endpoint, and llm_model are required")
 
-    llm = LLMProvider(body.llm_key, body.llm_endpoint, body.llm_model)
-    asyncio.create_task(_generate_review_background(course_id, course, llm, body.outline))
+    asyncio.create_task(_generate_review_background(course_id, course, body.llm_key, body.llm_endpoint, body.llm_model, body.outline))
     return {"task_id": str(uuid.uuid4())[:8], "message": "Review generation started"}
 
 
-async def _generate_review_background(course_id: int, course: dict, llm: LLMProvider, outline: Optional[str]):
+async def _generate_review_background(course_id: int, course: dict, llm_key: str, llm_endpoint: str, llm_model: str, outline: Optional[str]):
+    logger.info("Review generation starting: course=%s, model=%s, endpoint=%s", course["name"], llm_model, llm_endpoint)
     course_dir = DATA_DIR / course["dir_name"]
+
+    async def _tool_cb(tool_name: str, path: str, status: str, detail: str):
+        await push_event(course_id, "tool", json.dumps({
+            "tool": tool_name,
+            "path": path,
+            "status": status,
+            "detail": detail[:200] if detail else "",
+        }))
 
     # Ensure review-guide dir exists
 
     # Export current questions to a file the Agent can read
     from backend.db import get_questions, get_knowledge_tags
     questions_export = course_dir / "_questions_export.md"
-    qs = get_questions(course_id)
+    qs = get_questions(course_id, limit=9999)
     tags = get_knowledge_tags(course_id)
     if qs:
         lines = [f"# 题库：{course['name']}", "", f"知识点标签：{', '.join(tags)}", ""]
         for q in qs:
-            lines.append(f"### {q['qid']}")
-            lines.append(f"题型：{q['qtype']} | 难度：{q['difficulty']}")
+            lines.append(f"### {q['qid']}（来自：{q.get('source_file_name', '未知试卷')}）")
+            lines.append(f"题型：{q['qtype']} | 难度：{q['difficulty']} | 来源：{q.get('source_file_name', '未知试卷')}")
             lines.append(f"知识点：{q['knowledge_tags']}")
             lines.append("")
             lines.append(q['content'] or '')
@@ -87,17 +97,32 @@ async def _generate_review_background(course_id: int, course: dict, llm: LLMProv
             await push_message(course_id, "done")
             return
         await push_message(course_id, f"使用用户提供的大纲，共 {len(chapters)} 个章节")
+        logger.info("Outline: %d chapters (user-provided)", len(chapters))
     else:
         # Generate outline via Agent
         await push_message(course_id, "正在分析题库知识点，生成章节大纲...")
-        agent = Agent(llm, OUTLINE_PROMPT.format(outline_extra=""), course_dir)
+        agent = PiRpcAgent(OUTLINE_PROMPT.format(outline_extra=""), str(course_dir),
+                           llm_key, llm_endpoint, llm_model,
+                           on_tool=_tool_cb, task_label=f"outline-{course['dir_name']}")
         try:
             outline_result = await asyncio.wait_for(agent.run(), timeout=300)
         except asyncio.TimeoutError:
             await push_message(course_id, "大纲生成超时")
             await push_message(course_id, "done")
             return
+        except Exception as e:
+            await push_message(course_id, f"大纲生成失败: {e}")
+            await push_message(course_id, "done")
+            return
 
+        if outline_result == "TIMEOUT":
+            await push_message(course_id, "大纲生成超时")
+            await push_message(course_id, "done")
+            return
+        if outline_result.startswith("ERROR:"):
+            await push_message(course_id, f"大纲生成失败: {outline_result[6:].strip()[:200]}")
+            await push_message(course_id, "done")
+            return
         chapters = [ln.strip() for ln in outline_result.split("\n") if ln.strip() and not ln.startswith("DONE")]
         if not chapters:
             await push_message(course_id, "未能生成章节大纲")
@@ -105,6 +130,7 @@ async def _generate_review_background(course_id: int, course: dict, llm: LLMProv
             return
 
         await push_message(course_id, f"生成 {len(chapters)} 个章节: {', '.join(chapters)}")
+        logger.info("Outline: %d chapters (AI-generated)", len(chapters))
 
         # Save generated outline to course
         from backend.db import get_db
@@ -134,8 +160,8 @@ async def _generate_review_background(course_id: int, course: dict, llm: LLMProv
         ch_file = bank_dir / f"{_sanitize_filename(chapter_title)}.md"
         ch_lines = [f"# {chapter_title}", ""]
         for q in matched:
-            ch_lines.append(f"## {q['qid']}")
-            ch_lines.append(f"**题型**：{q['qtype']} | **难度**：{q['difficulty']} | **知识点**：{q['knowledge_tags']}")
+            ch_lines.append(f"## {q['qid']}（来自：{q.get('source_file_name', '未知试卷')}）")
+            ch_lines.append(f"**题型**：{q['qtype']} | **难度**：{q['difficulty']} | **知识点**：{q['knowledge_tags']} | **来源**：{q.get('source_file_name', '未知试卷')}")
             ch_lines.append("")
             ch_lines.append(q["content"] or "")
             if q.get("answer"):
@@ -144,12 +170,14 @@ async def _generate_review_background(course_id: int, course: dict, llm: LLMProv
                 ch_lines.append(f"\n**解析**：{q['explanation']}")
             ch_lines.append("")
         ch_file.write_text("\n".join(ch_lines), encoding="utf-8")
+    file_count = sum(1 for _ in bank_dir.iterdir()) if bank_dir.exists() else 0
+    logger.info("Question bank: %d total questions → %d chapter files", len(qs), file_count)
 
-
-    # Step 2: Generate each chapter serially
     previous_summaries = []
+
     for i, chapter_title in enumerate(chapters, 1):
         await push_message(course_id, f"正在生成第 {i} 章: {chapter_title}")
+        logger.info("Chapter %d/%d (%s): generating, model=%s, endpoint=%s", i, len(chapters), chapter_title, llm_model, llm_endpoint)
 
         prompt = CHAPTER_PROMPT.format(
             course_name=course["name"],
@@ -159,12 +187,22 @@ async def _generate_review_background(course_id: int, course: dict, llm: LLMProv
             previous_chapters_summary="\n".join(previous_summaries) if previous_summaries else "（尚无已完成的章节）",
         )
 
-        agent = Agent(llm, prompt, course_dir)
+        agent = PiRpcAgent(prompt, str(course_dir), llm_key, llm_endpoint, llm_model,
+                           on_tool=_tool_cb, task_label=f"ch{i}-{chapter_title}")
         chapter_content = ""
         try:
-            chapter_content = await asyncio.wait_for(agent.run(), timeout=600)
+            chapter_content = await asyncio.wait_for(agent.run(timeout=600), timeout=600)
         except asyncio.TimeoutError:
             await push_message(course_id, f"第 {i} 章生成超时，跳过")
+            continue
+        except Exception as e:
+            await push_message(course_id, f"第 {i} 章生成失败: {e}")
+            continue
+        if chapter_content == "TIMEOUT":
+            await push_message(course_id, f"第 {i} 章生成超时，跳过")
+            continue
+        if chapter_content.startswith("ERROR:"):
+            await push_message(course_id, f"第 {i} 章生成错误: {chapter_content[6:].strip()[:200]}")
             continue
 
         # If the Agent didn't write the file (edit/write failed), write result directly
@@ -178,11 +216,12 @@ async def _generate_review_background(course_id: int, course: dict, llm: LLMProv
         previous_summaries.append(f"{chapter_title}: {first_para[:100]}")
 
         await push_message(course_id, f"完成第 {i} 章: {chapter_title}")
+        logger.info("Chapter %d/%d (%s): done (%d bytes)", i, len(chapters), chapter_title,
+                     chapter_file.stat().st_size if chapter_file.exists() else len(chapter_content))
 
 
     await push_message(course_id, "复习手册生成完毕")
     await push_message(course_id, "done")
-    await llm.aclose()
 
 
 @router.get("/review/chapters")

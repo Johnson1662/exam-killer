@@ -43,8 +43,33 @@ class QuestionResponse(BaseModel):
     difficulty: int = 1
 
 
+class QuestionUpdate(BaseModel):
+    qtype: Optional[str] = None
+    content: Optional[str] = None
+    options: Optional[str] = None
+    answer: Optional[str] = None
+    explanation: Optional[str] = None
+    knowledge_tags: Optional[str] = None
+    difficulty: Optional[int] = None
+    chapter_tags: Optional[str] = None
+
 class ReviewGenerateRequest(BaseModel):
     llm_key: str
     llm_endpoint: str
     llm_model: str
     outline: Optional[str] = None
+
+
+class LLMModelsRequest(BaseModel):
+    provider_id: str
+    endpoint: str
+    api_key: str
+
+
+class LLMModelItem(BaseModel):
+    label: str
+    value: str
+
+
+class LLMModelsResponse(BaseModel):
+    models: list[LLMModelItem]

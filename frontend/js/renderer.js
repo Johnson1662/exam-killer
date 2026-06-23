@@ -39,6 +39,45 @@ function restorePlaceholders(html, fragments) {
   return html;
 }
 
+function convertObsidianCallouts(text) {
+  /* Convert Obsidian foldable callouts to <details> elements.
+     > [!TYPE]- Summary   → <details> (collapsed)
+     > [!TYPE]+ Summary   → <details open> (expanded)
+  */
+  const lines = text.split('\n');
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const m = lines[i].match(/^> \[!(\w+)]([-+])\s*(.*)$/);
+    if (m) {
+      const [, , foldable, summary] = m;
+      const collapsed = foldable === '-';
+      const body = [];
+      i++;
+      while (i < lines.length) {
+        const cur = lines[i];
+        if (/^>\s?/.test(cur)) {
+          body.push(cur.replace(/^>\s?/, ''));
+          i++;
+        } else if (cur === '' && i + 1 < lines.length && /^>\s?/.test(lines[i + 1])) {
+          body.push('');
+          i++;
+        } else {
+          break;
+        }
+      }
+      out.push(`<details${collapsed ? '' : ' open'}>`);
+      out.push(`<summary>${summary || 'Details'}</summary>`);
+      out.push(body.join('\n'));
+      out.push('</details>');
+    } else {
+      out.push(lines[i]);
+      i++;
+    }
+  }
+  return out.join('\n');
+}
+
 function createRenderer() {
   const renderer = new marked.Renderer();
   const origParagraph = renderer.paragraph.bind(renderer);
@@ -62,10 +101,10 @@ function createRenderer() {
   };
   return renderer;
 }
-
 function renderMarkdown(text, questionMap) {
   if (questionMap) setQuestionMap(questionMap);
-  const { text: cleanText, fragments } = extractAndPlacehold(text);
+  const converted = convertObsidianCallouts(text);
+  const { text: cleanText, fragments } = extractAndPlacehold(converted);
   const renderer = createRenderer();
   marked.setOptions({ renderer, breaks: true, gfm: true });
   let html = marked.parse(cleanText);

@@ -12,6 +12,7 @@ class LLMProvider:
             base_url=base,
             timeout=httpx.Timeout(120.0, connect=10.0),
         )
+        self.endpoint = base
         self.api_key = api_key
         self.model = model
 

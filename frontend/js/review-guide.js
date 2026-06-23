@@ -4,28 +4,47 @@ let _rgCourseId = null;
 
 async function renderReviewGuide(container, courseId, course) {
   _rgCourseId = courseId;
-  container.innerHTML = `
-    <div class="flex justify-between items-center mb-2">
-      <h3 style="margin:0">复习手册</h3>
-      <div id="rg-status"></div>
-    </div>
-    <div class="card">
-      <p class="text-muted mb-4">生成复习手册需要先完成题目抽取。AI 将根据课程内容与题库，为您自动整理核心考点与解析。</p>
-      <div class="form-group">
-        <label>自定义大纲 (可选)</label>
-        <textarea id="rg-outline" rows="4" placeholder="例如：\n第一章：极限与连续\n第二章：导数与微分\n..."></textarea>
-      </div>
-      <div class="flex justify-end mt-4">
-        <button class="btn btn-primary" id="btn-generate-review">
-          <i data-lucide="sparkles" style="width:18px; height:18px;"></i>
-          生成/更新复习手册
-        </button>
-
-      </div>
-      <div id="rg-progress" class="progress-log mt-4"></div>
-    </div>
-    <div class="mt-4" id="rg-chapters"></div>
-  `;
+  container.innerHTML = [
+    '<div class="flex justify-between items-center mb-2">',
+    '  <h3 style="margin:0">复习手册</h3>',
+    '  <div id="rg-status"></div>',
+    '</div>',
+    '',
+    '<!-- 可折叠配置区 -->',
+    '<div class="rg-config-header">',
+    '  <div style="font-size:0.8125rem; font-weight:500; color:var(--fg-subtle);">',
+    '    <span id="rg-config-summary">AI 配置与生成</span>',
+    '  </div>',
+    '  <button class="rg-config-toggle" id="btn-toggle-config">',
+    '    <i data-lucide="chevron-down" style="width:16px;height:16px;"></i>',
+    '    配置',
+    '  </button>',
+    '</div>',
+    '<div class="rg-config-body" id="rg-config-body">',
+    '  <div class="rg-config-card">',
+    '    <div style="flex:1">',
+    '      <div style="font-size:0.8125rem; font-weight:500; color:var(--fg); margin-bottom:2px;">自定义大纲（可选）</div>',
+    '      <p class="text-subtle" style="margin:0; font-size:0.75rem;">AI 将根据当前题库与自定义大纲，提取核心考点生成复习手册。</p>',
+    '    </div>',
+    '    <button class="btn btn-outline-sparkle" id="btn-generate-review">',
+    '      <i data-lucide="sparkles" style="width:14px;height:14px;"></i>',
+    '      生成手册',
+    '    </button>',
+    '  </div>',
+    '  <div class="mt-3">',
+    '    <textarea id="rg-outline" rows="3" placeholder="例如：&#10;第一章：极限与连续&#10;第二章：导数与微分&#10;..." style="width:100%;"></textarea>',
+    '  </div>',
+    '</div>',
+    '<div id="rg-progress" class="progress-log mt-4" style="display:none"></div>',
+    '<div class="rg-layout mt-4">',
+    '  <aside class="rg-sidebar">',
+    '    <div id="rg-chapters" class="chapter-list-nav"></div>',
+    '  </aside>',
+    '  <main class="rg-content-area">',
+    '    <div id="rg-chapter-content"></div>',
+    '  </main>',
+    '</div>',
+  ].join('\n');
 
   loadChapters();
 
@@ -80,9 +99,65 @@ async function renderReviewGuide(container, courseId, course) {
       progressEl.innerHTML += `<div>${e.data}</div>`;
       progressEl.scrollTop = progressEl.scrollHeight;
     });
+    let _toolCallId = 0;
+    let _thinkingRow = null;
+    es.addEventListener('tool', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        const rowId = `tool-${++_toolCallId}`;
+
+        if (d.tool === 'llm') {
+          if (d.status === 'thinking' && !_thinkingRow) {
+            _thinkingRow = document.createElement('div');
+            _thinkingRow.className = 'tool-call thinking';
+            _thinkingRow.id = 'thinking-indicator';
+            _thinkingRow.innerHTML = '<span class="tool-icon">\u{1F914}</span> <span class="tool-msg">AI 思考中...</span>';
+            progressEl.appendChild(_thinkingRow);
+            progressEl.scrollTop = progressEl.scrollHeight;
+          } else if (d.status === 'done' && _thinkingRow) {
+            _thinkingRow.remove();
+            _thinkingRow = null;
+          }
+          return;
+        }
+
+        if (_thinkingRow) {
+          _thinkingRow.remove();
+          _thinkingRow = null;
+        }
+
+        const icons = { read: '\u{1F4D6}', write: '\u{1F4DD}', edit: '\u{270F}\u{FE0F}' };
+        const icon = icons[d.tool] || '\u{2699}\u{FE0F}';
+        const pathStr = d.path || '';
+
+        let statusHtml = '';
+        if (d.status === 'running') {
+          statusHtml = '<span class="tool-spinner"></span>';
+        } else if (d.status === 'done') {
+          const detail = d.detail && isNaN(d.detail) ? '' : (d.detail ? ` (${d.detail})` : '');
+          statusHtml = '<span class="tool-check">\u2713</span>' + detail;
+        } else if (d.status === 'error') {
+          statusHtml = '<span class="tool-error">\u2717</span> ' + (d.detail || '');
+        }
+
+        const div = document.createElement('div');
+        div.className = 'tool-call' + (d.status === 'running' ? ' running' : '');
+        div.id = rowId;
+        div.innerHTML = `<span class="tool-icon">${icon}</span> <span class="tool-msg">${d.tool === 'write' ? '写入' : d.tool === 'read' ? '读取' : '编辑'} ${pathStr}</span> <span class="tool-status">${statusHtml}</span>`;
+        progressEl.appendChild(div);
+        progressEl.scrollTop = progressEl.scrollHeight;
+      } catch (_) {}
+    });
+  });
+
+  // 折叠/展开配置区
+  const toggleBtn = document.getElementById('btn-toggle-config');
+  const configBody = document.getElementById('rg-config-body');
+  toggleBtn.addEventListener('click', () => {
+    configBody.classList.toggle('collapsed');
+    toggleBtn.classList.toggle('collapsed');
   });
 }
-
 async function loadChapters() {
   const el = document.getElementById('rg-chapters');
   if (!el) return;
@@ -98,33 +173,28 @@ async function loadChapters() {
       return;
     }
 
-    el.innerHTML = `
-      <h3 class="mb-2">已有章节</h3>
-      <div class="chapter-list">
-        ${chapters.map((ch, i) => `
-          <div class="chapter-item" data-filename="${ch.filename}">
-            <div class="chapter-num">${String(i + 1).padStart(2, '0')}</div>
-            <div class="chapter-title">${ch.title}</div>
-            <div style="margin-left:auto; opacity:0.3;">
-              <i data-lucide="chevron-right"></i>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-      <div id="rg-chapter-content" class="mt-4"></div>
-    `;
+    /* 有章节 → 折叠配置区 */
+    const cb = document.getElementById('rg-config-body');
+    const tb = document.getElementById('btn-toggle-config');
+    if (cb && tb) { cb.classList.add('collapsed'); tb.classList.add('collapsed'); }
+
+    el.innerHTML = [
+      '<div class="chapter-list">',
+      ...chapters.map((ch, i) => [
+        `<div class="chapter-item" data-filename="${ch.filename}">`,
+        `  <div class="chapter-num">${String(i + 1).padStart(2, '00')}</div>`,
+        `  <div class="chapter-title">${ch.title}</div>`,
+        `</div>`,
+      ]).flat(),
+      '</div>',
+    ].join('\n');
     lucide.createIcons();
 
     // Event listeners for chapters
     el.querySelectorAll('.chapter-item').forEach(item => {
       item.addEventListener('click', async () => {
-        // Highlight active chapter
-        el.querySelectorAll('.chapter-item').forEach(i => {
-           i.style.borderColor = 'var(--border)';
-           i.style.background = 'var(--surface)';
-        });
-        item.style.borderColor = 'var(--accent)';
-        item.style.background = 'var(--accent-soft)';
+        el.querySelectorAll('.chapter-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
 
         const filename = item.dataset.filename;
         const contentEl = document.getElementById('rg-chapter-content');
@@ -132,7 +202,6 @@ async function loadChapters() {
         
         try {
           const res = await API.get(`/api/courses/${_rgCourseId}/review/chapters/${filename}`);
-          // Fetch questions to populate the map for [Qxxxx] references
           const questions = await API.get(`/api/courses/${_rgCourseId}/questions`);
           const qMap = {};
           questions.forEach(q => {
@@ -140,14 +209,13 @@ async function loadChapters() {
           });
           
           contentEl.innerHTML = `
-            <div class="card fade-in" style="padding:48px; border-top: 8px solid var(--accent);">
+            <div class="card fade-in" style="padding:48px;">
               <div class="markdown-content">
                 ${renderMarkdown(res.content, qMap)}
               </div>
             </div>
           `;
           lucide.createIcons();
-          // Scroll to content
           contentEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         } catch (e) {
           contentEl.innerHTML = `<div class="card"><p class="text-danger">加载失败: ${e.message}</p></div>`;

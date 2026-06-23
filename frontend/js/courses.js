@@ -61,6 +61,7 @@ router.register('/', async (app) => {
               <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
             </button>
           </div>
+        </div>
       `).join('');
       
       listEl.querySelectorAll('.course-card').forEach(el => {

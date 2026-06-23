@@ -2,6 +2,7 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -13,7 +14,7 @@ from backend.db import (
 from backend.config import DATA_DIR, MAX_PAGES, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE
 from backend.models import ParseRequest, FileUploadResponse
 from backend.sse import push_message, event_stream
-from backend.sdk_extract import parse_pdf
+from backend.sdk_extract import parse_document as parse_pdf
 from backend.llm import LLMProvider
 from backend.agent.core import Agent
 from backend.agent.prompts.extractor import EXTRACTOR_PROMPT
@@ -109,7 +110,7 @@ async def _parse_background(course_id: int, dir_name: str, token: str, file_ids:
 
             # Save content_list
             with open(output_dir / "content_list.json", "w", encoding="utf-8") as f:
-                json.dump(result.content_list, f, ensure_ascii=False, indent=2)
+                json.dump(result.content_list or [], f, ensure_ascii=False, indent=2)
 
             update_file_status(fid, "parsed", raw_dir=raw_dir)
             await push_message(course_id, f"解析完成: {file_info['filename']}")
@@ -164,6 +165,26 @@ async def trigger_extract(course_id: int, body: dict):
     return {"task_id": str(uuid.uuid4())[:8], "message": "Extraction started"}
 
 
+
+def _find_paired_file(course_id: int, filename: str) -> Optional[dict]:
+    """Find a paired answer file (named ``{basename}_答案.*``) for a given exam file.
+
+    Returns the answer file's dict (from ``get_files``), or ``None``.
+    Skips files whose name already contains ``_答案``.
+    """
+    if "_答案" in filename:
+        return None
+    base = Path(filename).stem
+    target = base + "_答案"
+    for f in get_files(course_id):
+        fname = f.get("original_name", "")
+        # Skip self and non-answer files
+        if fname == filename or f["id"] == -1:
+            continue
+        if Path(fname).stem == target:
+            return f
+    return None
+
 async def _run_extract_agents(course_id: int, course: dict, llm: LLMProvider, file_ids: list[int], chapters: str = ""):
     course_dir = DATA_DIR / course["dir_name"]
 
@@ -185,14 +206,26 @@ async def _run_extract_agents(course_id: int, course: dict, llm: LLMProvider, fi
             file_chapters = file_info.get("chapters", "") if file_info else ""
             chapter_context = file_chapters if file_chapters else "(未指定章节，请根据内容判断)"
 
+        paired_f = _find_paired_file(course_id, file_info["filename"])
+        paired_info = ""
+        paired_read_instruction = ""
+        paired_path = ""
+        if paired_f:
+            paired_info = f"配对的答案文件：{paired_f['original_name']}（raw/{paired_f['id']}/output.md）"
+            paired_read_instruction = (
+                f"\n再用 read 读取 `raw/{paired_f['id']}/output.md` 查看答案文件中的参考答案。\n"
+                "将答案与当前试卷的题目一一对应后填入 `<!-- ANSWER -->` 段。"
+            )
+            paired_path = paired_f["original_name"]
+
         prompt = EXTRACTOR_PROMPT.format(
             course_name=course["name"],
             file_id=fid,
             filename=file_info["filename"],
             file_type=file_info.get("file_type", "mixed"),
-            paired_info="",
-            paired_read_instruction="",
-            paired_path="",
+            paired_info=paired_info,
+            paired_read_instruction=paired_read_instruction,
+            paired_path=paired_path,
             chapter_context=chapter_context,
         )
 
@@ -220,6 +253,40 @@ async def _run_extract_agents(course_id: int, course: dict, llm: LLMProvider, fi
         await push_message(course_id, f"题库同步完成，共 {count} 道题")
     except Exception as e:
         await push_message(course_id, f"题库同步失败: {e}")
+
+    # Zero-question retry after sync
+    raw_base = course_dir / "raw"
+    zero_fids = []
+    for fid in file_ids:
+        if not fid:
+            continue
+        output_file = raw_base / str(fid) / "output.md"
+        if output_file.exists():
+            content = output_file.read_text(encoding="utf-8")
+            if content.count("<!-- QUESTION:") == 0:
+                zero_fids.append(fid)
+
+    if zero_fids:
+        await push_message(course_id, f"重新提取 {len(zero_fids)} 个文件（首次提取到 0 题）...")
+        for fid in zero_fids:
+            update_file_status(fid, "parsed")
+        retry_tasks = [process_one(fid) for fid in zero_fids]
+        await asyncio.gather(*retry_tasks)
+
+        try:
+            count = sync_all_questions(course_id)
+            await push_message(course_id, f"重试后题库同步完成，共 {count} 道题")
+        except Exception as e:
+            await push_message(course_id, f"重试后题库同步失败: {e}")
+
+        for fid in zero_fids:
+            output_file = raw_base / str(fid) / "output.md"
+            if output_file.exists():
+                content = output_file.read_text(encoding="utf-8")
+                if content.count("<!-- QUESTION:") == 0:
+                    fi = get_file(fid)
+                    name = fi["filename"] if fi else f"文件#{fid}"
+                    await push_message(course_id, f"跳过 {name}（重试后仍为 0 题）")
 
     await push_message(course_id, "done")
     await llm.aclose()

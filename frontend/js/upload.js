@@ -139,7 +139,7 @@ async function renderUpload(container, courseId, course) {
     const cfg = getLLMConfig();
     if (!cfg.mineru_token) { window.toast('\u8BF7\u5148\u5728\u201C\u8BBE\u7F6E\u201D\u9875\u9762\u586B\u5199 MinerU Token', 'error'); return; }
     const files = await API.get(`/api/courses/${courseId}/files`);
-    const pending = files.filter(f => f.status === 'pending').map(f => f.id);
+    const pending = files.filter(f => f.status === 'pending' || f.status === 'failed').map(f => f.id);
     if (!pending.length) { window.toast('\u6CA1\u6709\u5F85\u89E3\u6790\u7684\u6587\u4EF6', 'error'); return; }
     await API.post(`/api/courses/${courseId}/parse`, {
       mineru_token: cfg.mineru_token,

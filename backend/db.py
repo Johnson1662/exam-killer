@@ -43,7 +43,7 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS questions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            qid TEXT UNIQUE NOT NULL,
+            qid TEXT NOT NULL,
             course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
             source_file_id INTEGER REFERENCES files(id),
             qtype TEXT DEFAULT '',
@@ -52,8 +52,10 @@ def init_db():
             answer TEXT,
             explanation TEXT,
             knowledge_tags TEXT,
+            chapter_tags TEXT DEFAULT '',
             difficulty INTEGER DEFAULT 1,
-            created_at TEXT DEFAULT (datetime('now'))
+            created_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(course_id, qid)
         );
         CREATE TABLE IF NOT EXISTS knowledge_tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,6 +75,38 @@ def init_db():
             db.execute(alter)
         except Exception:
             pass
+    db.commit()
+
+    # v0.3 migration: change qid from global UNIQUE to per-course UNIQUE(course_id, qid)
+    try:
+        idx_info = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='questions'"
+        ).fetchone()
+        if idx_info and "qid TEXT UNIQUE" in (idx_info["sql"] or ""):
+            db.executescript("""
+                CREATE TABLE questions_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    qid TEXT NOT NULL,
+                    course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+                    source_file_id INTEGER REFERENCES files(id),
+                    qtype TEXT DEFAULT '',
+                    content TEXT NOT NULL,
+                    options TEXT,
+                    answer TEXT,
+                    explanation TEXT,
+                    knowledge_tags TEXT,
+                    chapter_tags TEXT DEFAULT '',
+                    difficulty INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    UNIQUE(course_id, qid)
+                );
+                INSERT INTO questions_new (id, qid, course_id, source_file_id, qtype, content, options, answer, explanation, knowledge_tags, chapter_tags, difficulty, created_at)
+                    SELECT id, qid, course_id, source_file_id, qtype, content, options, answer, explanation, knowledge_tags, chapter_tags, difficulty, created_at FROM questions;
+                DROP TABLE questions;
+                ALTER TABLE questions_new RENAME TO questions;
+            """)
+    except Exception:
+        pass
     db.commit()
 
 
@@ -148,13 +182,13 @@ def get_files(course_id: int) -> list[dict]:
 
 
 def get_unparsed_file_ids(course_id: int, file_ids: list[int]) -> list[int]:
-    """Return file ids from file_ids that are not yet parsed/failed."""
+    """Return file ids from file_ids that are pending or failed (need to be parsed)."""
     if not file_ids:
         return []
     db = get_db()
     placeholders = ",".join("?" * len(file_ids))
     rows = db.execute(
-        f"SELECT id FROM files WHERE course_id=? AND id IN ({placeholders}) AND status='pending'",
+        f"SELECT id FROM files WHERE course_id=? AND id IN ({placeholders}) AND status IN ('pending','failed')",
         [course_id, *file_ids],
     ).fetchall()
     return [r["id"] for r in rows]
@@ -309,7 +343,7 @@ def parse_annotated_questions(text: str, source_label: str) -> list[dict]:
         chapter = _extract_kv(header, "chapter", "")
         tags = _extract_kv(header, "tags", "")
         diff_str = _extract_kv(header, "difficulty", "1")
-
+        qid = _extract_kv(header, "qid", "")
         difficulty = 1
         try:
             difficulty = int(diff_str)
@@ -356,6 +390,7 @@ def parse_annotated_questions(text: str, source_label: str) -> list[dict]:
             "source": source_label,
             "explanation": explanation or "",
             "difficulty": difficulty,
+            "qid": qid,
         })
     return questions
 
@@ -375,6 +410,72 @@ def _strip_trailing_fields(text: str, field_names: list[str]) -> str:
         else:
             break
     return "\n".join(lines[:end]).strip()
+
+
+def _annotate_qids(course_dir: Path, questions: list[dict]):
+    """Inject ``qid=QXXXX`` into each ``<!-- QUESTION:`` header in output.md files."""
+    from collections import defaultdict
+
+    by_src: dict[str, list[dict]] = defaultdict(list)
+    for q in questions:
+        src = q.get("source", "")
+        if src:
+            by_src[src].append(q)
+
+    for raw_dir_name, file_questions in by_src.items():
+        output_file = course_dir / "raw" / raw_dir_name / "output.md"
+        if not output_file.exists():
+            continue
+
+        text = output_file.read_text("utf-8")
+        matches = list(_ANNOTATION_RE.finditer(text))
+        if len(matches) != len(file_questions):
+            continue  # dedup removed some — can't map reliably
+
+        for match, q in reversed(list(zip(matches, file_questions))):
+            header = match.group(1)
+            if f"qid={q['qid']}" in header:
+                continue
+            new_header = header + f" qid={q['qid']}"
+            text = text[:match.start(1)] + new_header + text[match.end(1):]
+
+        output_file.write_text(text, encoding="utf-8")
+
+
+def delete_question_from_file(course_id: int, qid: str) -> bool:
+    """Remove the ``<!-- QUESTION: ... qid=QXXXX ... -->`` block from ``output.md``."""
+    course = get_course(course_id)
+    if not course:
+        return False
+    course_dir = DATA_DIR / course["dir_name"]
+
+    # Find which raw directory this question belongs to
+    db = get_db()
+    row = db.execute(
+        "SELECT source_file_id FROM questions WHERE course_id=? AND qid=?",
+        (course_id, qid),
+    ).fetchone()
+    if not row or not row["source_file_id"]:
+        return False
+
+    raw_dir = course_dir / "raw" / str(row["source_file_id"])
+    output_file = raw_dir / "output.md"
+    if not output_file.exists():
+        return False
+
+    text = output_file.read_text("utf-8")
+    qid_pattern = re.compile(
+        rf"<!-- QUESTION: .*?\bqid={re.escape(qid)}\b.*? -->\s*\n.*?\n\s*<!-- QUESTION END -->",
+        re.DOTALL,
+    )
+    match = qid_pattern.search(text)
+    if not match:
+        return False
+
+    new_text = text[:match.start()] + text[match.end():]
+    new_text = re.sub(r"\n{3,}", "\n\n", new_text)
+    output_file.write_text(new_text, encoding="utf-8")
+    return True
 
 
 def sync_all_questions(course_id: int) -> int:
@@ -462,9 +563,20 @@ def sync_all_questions(course_id: int) -> int:
                     if t:
                         all_tags.add(t)
 
-    # Assign QIDs sequentially
-    for i, q in enumerate(unique, 1):
-        q["qid"] = f"Q{i:04d}"
+    # Assign QIDs to questions that don't have one yet
+    db = get_db()
+    max_qid_row = db.execute(
+        "SELECT MAX(CAST(SUBSTR(qid,2) AS INTEGER)) AS max_num FROM questions WHERE course_id=?",
+        (course_id,)
+    ).fetchone()
+    next_num = (max_qid_row["max_num"] or 0) + 1
+    for q in unique:
+        if not q.get("qid"):
+            q["qid"] = f"Q{next_num:04d}"
+            next_num += 1
+
+    # Inject QIDs into annotation blocks so future deletion can find them
+    _annotate_qids(course_dir, unique)
 
     # Write to SQLite
     db = get_db()
@@ -497,6 +609,119 @@ def sync_all_questions(course_id: int) -> int:
 
     return len(unique)
 
+def delete_question(course_id: int, qid: str) -> bool:
+    db = get_db()
+    cur = db.execute("DELETE FROM questions WHERE course_id=? AND qid=?", (course_id, qid))
+    db.commit()
+    return cur.rowcount > 0
+
+
+def update_question(course_id: int, qid: str, data: dict) -> bool:
+    """Update question fields in SQLite. ``data`` keys matching column names."""
+    db = get_db()
+    set_clauses = []
+    params = []
+    for key in ("qtype", "content", "options", "answer", "explanation", "knowledge_tags", "difficulty", "chapter_tags"):
+        if key in data:
+            set_clauses.append(f"{key}=?")
+            params.append(data[key])
+    if not set_clauses:
+        return False
+    params.extend([course_id, qid])
+    cur = db.execute(
+        f"UPDATE questions SET {', '.join(set_clauses)} WHERE course_id=? AND qid=?",
+        params,
+    )
+    db.commit()
+    return cur.rowcount > 0
+
+
+def _set_kv(header: str, key: str, value: str) -> str:
+    """Replace or append a ``key=value`` pair in a ``<!-- QUESTION: ... -->`` header string."""
+    pat = re.compile(rf"\b{re.escape(key)}=.+?(?=\s+\w+=|\s*$)")
+    if pat.search(header):
+        return pat.sub(f"{key}={value}", header, count=1)
+    return f"{header} {key}={value}"
+
+
+def update_question_in_file(course_id: int, qid: str, data: dict) -> bool:
+    """Update the ``<!-- QUESTION: ... qid=QXXXX ... -->`` annotation block in ``output.md``."""
+    course = get_course(course_id)
+    if not course:
+        return False
+    course_dir = DATA_DIR / course["dir_name"]
+
+    db = get_db()
+    row = db.execute(
+        "SELECT source_file_id FROM questions WHERE course_id=? AND qid=?",
+        (course_id, qid),
+    ).fetchone()
+    if not row or not row["source_file_id"]:
+        return False
+
+    raw_dir = course_dir / "raw" / str(row["source_file_id"])
+    output_file = raw_dir / "output.md"
+    if not output_file.exists():
+        return False
+
+    text = output_file.read_text("utf-8")
+
+    # Locate the annotation block by matching qid in header
+    target_match = None
+    for match in _ANNOTATION_RE.finditer(text):
+        if _extract_kv(match.group(1), "qid") == qid:
+            target_match = match
+            break
+
+    if not target_match:
+        return False
+
+    header = target_match.group(1)
+    body = target_match.group(2)
+
+    # Update header fields
+    if "qtype" in data:
+        header = _set_kv(header, "qtype", data["qtype"])
+    if "knowledge_tags" in data:
+        header = _set_kv(header, "tags", data["knowledge_tags"])
+    if "difficulty" in data:
+        header = _set_kv(header, "difficulty", str(data["difficulty"]))
+    if "chapter_tags" in data:
+        header = _set_kv(header, "chapter", data["chapter_tags"])
+
+    # Split on markers: body may have <!-- ANSWER --> and <!-- EXPLANATION -->
+    ans_parts = _ANSWER_RE.split(body, maxsplit=1)
+    orig_content = ans_parts[0].strip()
+    if len(ans_parts) > 1:
+        expl_parts = _EXPLANATION_RE.split(ans_parts[1], maxsplit=1)
+        orig_answer = expl_parts[0].strip()
+        orig_explanation = expl_parts[1].strip() if len(expl_parts) > 1 else ""
+    else:
+        orig_content = body.strip()
+        orig_answer = ""
+        orig_explanation = ""
+
+    # Rebuild body (use original if field not in data)
+    new_content = data.get("content", orig_content)
+    new_answer = data.get("answer", orig_answer)
+    new_explanation = data.get("explanation", orig_explanation)
+
+    new_body = new_content
+    if new_answer:
+        new_body += f"\n\n<!-- ANSWER -->\n{new_answer}"
+    if new_explanation:
+        new_body += f"\n\n<!-- EXPLANATION -->\n{new_explanation}"
+
+    # Replace the full match span
+    new_text = (
+        text[:target_match.start()]
+        + f"<!-- QUESTION: {header} -->\n{new_body}\n<!-- QUESTION END -->"
+        + text[target_match.end():]
+    )
+
+    output_file.write_text(new_text, encoding="utf-8")
+    return True
+
 
 def get_questions(
     course_id: int,
@@ -506,15 +731,22 @@ def get_questions(
     offset: int = 0,
 ) -> list[dict]:
     db = get_db()
-    clauses = ["course_id = ?"]
+    clauses: list[str] = []
     params: list = [course_id]
     if tag:
-        clauses.append("knowledge_tags LIKE ?")
+        clauses.append("q.knowledge_tags LIKE ?")
         params.append(f"%{tag}%")
     if qtype:
-        clauses.append("qtype = ?")
+        clauses.append("q.qtype = ?")
         params.append(qtype)
-    sql = f"SELECT * FROM questions WHERE {' AND '.join(clauses)} ORDER BY qid LIMIT ? OFFSET ?"
+    where_clause = "q.course_id = ?"
+    if clauses:
+        where_clause += " AND " + " AND ".join(clauses)
+    sql = f"""SELECT q.*, f.original_name AS source_file_name
+               FROM questions q
+               LEFT JOIN files f ON q.source_file_id = f.id
+               WHERE {where_clause}
+               ORDER BY q.qid LIMIT ? OFFSET ?"""
     params.extend([limit, offset])
     rows = db.execute(sql, params).fetchall()
     return [dict(r) for r in rows]

@@ -1,7 +1,7 @@
 /* Settings page — standalone top-level route (#/settings). */
 const PROVIDERS = [
   { id: 'opencode-zen', name: 'OpenCode Zen', endpoint: 'https://opencode.ai/zen/v1' },
-  { id: 'opencode-go', name: 'OpenCode Go', endpoint: 'https://opencode.ai/go/v1' },
+  { id: 'opencode-go', name: 'OpenCode Go', endpoint: 'https://opencode.ai/zen/go/v1' },
   { id: 'deepseek', name: 'DeepSeek', endpoint: 'https://api.deepseek.com/v1' },
   { id: 'ollama', name: 'Ollama Cloud', endpoint: 'https://ollama.com' },
   { id: 'openai', name: 'OpenAI', endpoint: 'https://api.openai.com/v1' },
@@ -19,32 +19,16 @@ function inferProvider(endpoint) {
 }
 
 async function fetchModels(providerId, endpoint, apiKey) {
-  if (!endpoint || !apiKey) throw new Error('Endpoint and API key required');
+  if (!endpoint) throw new Error('Endpoint 不能为空');
+  if (providerId !== 'ollama' && !apiKey) throw new Error('请先填写 API Key');
 
-  let url;
-  let headers = { 'Content-Type': 'application/json' };
+  const resp = await API.post('/api/llm/models', {
+    provider_id: providerId,
+    endpoint: endpoint,
+    api_key: apiKey,
+  });
 
-  if (providerId === 'ollama') {
-    url = endpoint.replace(/\/+$/, '') + '/api/tags';
-  } else {
-    const base = endpoint.replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
-    url = base + '/models';
-    headers['Authorization'] = 'Bearer ' + apiKey;
-  }
-
-  const resp = await fetch(url, { headers });
-  if (!resp.ok) throw new Error('HTTP ' + resp.status);
-
-  const data = await resp.json();
-
-  // Normalise: OpenAI { data: [{id}] }  or  Ollama { models: [{name}] }
-  let models = [];
-  if (data.data && Array.isArray(data.data)) {
-    models = data.data.map(function (m) { return { label: m.id, value: m.id }; });
-  } else if (data.models && Array.isArray(data.models)) {
-    models = data.models.map(function (m) { return { label: m.name, value: m.name }; });
-  }
-  return models;
+  return resp && Array.isArray(resp.models) ? resp.models : [];
 }
 
 router.register('/settings', async function (app) {
@@ -194,14 +178,13 @@ router.register('/settings', async function (app) {
         window.toast('未获取到模型列表', 'error');
         return;
       }
-
       var dl = document.getElementById('model-list');
       dl.innerHTML = models.map(function (m) {
         return '<option value="' + m.value + '">' + m.label + '</option>';
       }).join('');
 
       // Pick first model if input is empty
-      if (!modelInput.value) {
+      if (!modelInput.value && models.length > 0) {
         modelInput.value = models[0].value;
       }
 
