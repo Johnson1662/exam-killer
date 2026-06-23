@@ -21,15 +21,25 @@ DB_PATH = Path("exam_killer.db")
 
 # ── helpers ──────────────────────────────────────────────────────────
 
+
 def slugify(text: str) -> str:
-    return re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff_-]', '_', text).strip('_') or "course"
+    return re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff_-]", "_", text).strip("_") or "course"
+
 
 def esc_html(text: str) -> str:
-    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    return (
+        (text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
 
 def icon_svg(name: str) -> str:
     """Minimal SVG placeholder for Lucide icons (just returns a placeholder)."""
     return f'<i data-lucide="{name}"></i>'
+
 
 # ── HTML templates ───────────────────────────────────────────────────
 
@@ -43,7 +53,7 @@ HTML_SHELL = """\
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-<link rel="stylesheet" href="/assets/css/style.css">
+<link rel="stylesheet" href="{base}/assets/css/style.css">
 </head>
 <body>
 <div id="app" class="container" style="padding-top:24px;padding-bottom:80px;">
@@ -82,10 +92,12 @@ function showTab(name) {{
 
 # ── data reading ─────────────────────────────────────────────────────
 
+
 def get_db() -> sqlite3.Connection:
     db = sqlite3.connect(str(DB_PATH))
     db.row_factory = sqlite3.Row
     return db
+
 
 def load_courses(db):
     return db.execute(
@@ -93,12 +105,15 @@ def load_courses(db):
         "FROM courses c ORDER BY c.name"
     ).fetchall()
 
+
 def load_questions(db, course_id):
     return db.execute(
         "SELECT q.*, f.original_name AS source_file_name "
         "FROM questions q LEFT JOIN files f ON q.source_file_id = f.id "
-        "WHERE q.course_id=? ORDER BY q.qid", (course_id,)
+        "WHERE q.course_id=? ORDER BY q.qid",
+        (course_id,),
     ).fetchall()
+
 
 def load_chapters(db, course_id):
     rows = db.execute(
@@ -115,11 +130,14 @@ def load_chapters(db, course_id):
                 result.append(ch)
     return result
 
+
 def load_knowledge_tags(db, course_id):
     rows = db.execute(
-        "SELECT tag_name FROM knowledge_tags WHERE course_id=? ORDER BY tag_name", (course_id,)
+        "SELECT tag_name FROM knowledge_tags WHERE course_id=? ORDER BY tag_name",
+        (course_id,),
     ).fetchall()
     return [r["tag_name"] for r in rows]
+
 
 def load_review_guides(course_dir):
     guide_dir = Path(str(DATA_DIR)) / course_dir / "review-guide"
@@ -128,8 +146,11 @@ def load_review_guides(course_dir):
         for f in sorted(guide_dir.iterdir()):
             if f.suffix == ".md":
                 title = f.stem[3:] if f.stem[:2].isdigit() else f.stem
-                chapters.append({"filename": f.name, "title": title, "size": f.stat().st_size})
+                chapters.append(
+                    {"filename": f.name, "title": title, "size": f.stat().st_size}
+                )
     return chapters
+
 
 def render_markdown_to_html(text: str) -> str:
     """Minimal markdown → HTML for static export (without KaTeX rendering).
@@ -141,29 +162,30 @@ def render_markdown_to_html(text: str) -> str:
     # Store LaTeX for client-side rendering
     # Replace $$...$$ and $...$ with katex-tex spans
     text = re.sub(
-        r'\$\$(.+?)\$\$',
+        r"\$\$(.+?)\$\$",
         r'<span class="katex-tex" data-display="true">\1</span>',
-        text, flags=re.DOTALL
+        text,
+        flags=re.DOTALL,
     )
     text = re.sub(
-        r'\$(.+?)\$',
-        r'<span class="katex-tex" data-display="false">\1</span>',
-        text
+        r"\$(.+?)\$", r'<span class="katex-tex" data-display="false">\1</span>', text
     )
     # Basic markdown: paragraphs, bold, italic, newlines
     paragraphs = []
-    for para in text.split('\n\n'):
+    for para in text.split("\n\n"):
         para = para.strip()
         if not para:
             continue
         # Inline formatting
-        para = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', para)
-        para = re.sub(r'\*(.+?)\*', r'<em>\1</em>', para)
-        para = re.sub(r'\n', r'<br>', para)
-        paragraphs.append(f'<p>{para}</p>')
-    return '\n'.join(paragraphs)
+        para = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", para)
+        para = re.sub(r"\*(.+?)\*", r"<em>\1</em>", para)
+        para = re.sub(r"\n", r"<br>", para)
+        paragraphs.append(f"<p>{para}</p>")
+    return "\n".join(paragraphs)
+
 
 # ── export functions ─────────────────────────────────────────────────
+
 
 def export_all():
     db = get_db()
@@ -193,7 +215,11 @@ def export_all():
     _write_page("index.html", "Exam-Killer · 期末复习资料", course_list_html)
 
     # 404.html for SPA fallback
-    _write_page("404.html", "页面未找到", '<h2>404</h2><p>页面未找到</p><a href="/">返回首页</a>')
+    _write_page(
+        "404.html",
+        "页面未找到",
+        '<h2>404</h2><p>页面未找到</p><a href="{base}/index.html">返回首页</a>',
+    )
 
     # Generate per-course pages
     for course in courses:
@@ -205,18 +231,22 @@ def export_all():
     db.close()
     print(f"\nDone. Site generated at {SITE_DIR}")
 
+
 def _render_course_list(courses):
     items = []
     for c in courses:
-        items.append(f"""\
-<div class="course-card" onclick="location.href='/{slugify(c['name'])}/'">
+        items.append(
+            f"""\
+<div class="course-card" onclick="location.href='{slugify(c['name'])}/'">
   <h3>{esc_html(c['name'])}</h3>
   <p class="text-muted">{c['question_count']} 道题</p>
-</div>""")
+</div>"""
+        )
     return f"""\
 <h1>Exam-Killer</h1>
 <p class="text-muted" style="margin-bottom:32px;">期末复习资料</p>
 <div class="course-grid">{''.join(items)}</div>"""
+
 
 def export_course(db, course):
     cid = course["id"]
@@ -235,26 +265,39 @@ def export_course(db, course):
     # Generate question bank HTML (reusable with JS for filtering)
     questions_data = []
     for q in questions:
-        questions_data.append({
+        qd = {
             "qid": q["qid"],
             "qtype": q["qtype"] or "",
-            "content": q["content"] or "",
-            "answer": q["answer"] or "",
-            "explanation": q["explanation"] or "",
+            "content": (q["content"] or "").replace(
+                "/api/assets/{0}/images/".format(course["dir_name"]), "../images/"
+            ),
+            "answer": (q["answer"] or "").replace(
+                "/api/assets/{0}/images/".format(course["dir_name"]), "../images/"
+            ),
+            "explanation": (q["explanation"] or "").replace(
+                "/api/assets/{0}/images/".format(course["dir_name"]), "../images/"
+            ),
             "knowledge_tags": q["knowledge_tags"] or "",
             "chapter_tags": q["chapter_tags"] or "",
             "difficulty": q["difficulty"] or 1,
             "source_file_name": q["source_file_name"] or "",
-        })
+        }
+        questions_data.append(qd)
 
     # Write questions.json
-    (course_dir / "questions.json").write_text(json.dumps(questions_data, ensure_ascii=False, indent=2), encoding="utf-8")
+    (course_dir / "questions.json").write_text(
+        json.dumps(questions_data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     # Write tags.json
-    (course_dir / "tags.json").write_text(json.dumps(tags, ensure_ascii=False), encoding="utf-8")
+    (course_dir / "tags.json").write_text(
+        json.dumps(tags, ensure_ascii=False), encoding="utf-8"
+    )
 
     # Write chapters.json
-    (course_dir / "chapters.json").write_text(json.dumps(chapters, ensure_ascii=False), encoding="utf-8")
+    (course_dir / "chapters.json").write_text(
+        json.dumps(chapters, ensure_ascii=False), encoding="utf-8"
+    )
 
     # Generate review guide HTML pages
     review_html_parts = []
@@ -277,12 +320,19 @@ def export_course(db, course):
             _write_page(
                 f"{cslug}/review-guide/{md_file.stem}.html",
                 f"{title} - {cname}",
-                review_html
+                review_html,
+                base="../..",
             )
-            review_html_parts.append(f'<div class="chapter-item" onclick="location.href=\'review-guide/{md_file.stem}.html\'"><span class="chapter-title">{esc_html(title)}</span></div>')
+            review_html_parts.append(
+                f'<div class="chapter-item" onclick="location.href=\'review-guide/{md_file.stem}.html\'"><span class="chapter-title">{esc_html(title)}</span></div>'
+            )
 
     # Build course index page
-    review_nav = ''.join(review_html_parts) if review_html_parts else '<p class="text-muted">暂无复习指南</p>'
+    review_nav = (
+        "".join(review_html_parts)
+        if review_html_parts
+        else '<p class="text-muted">暂无复习指南</p>'
+    )
     bank_html = _build_question_bank_html(cslug)
     content = COURSE_INDEX.format(
         course_name=esc_html(cname),
@@ -290,10 +340,11 @@ def export_course(db, course):
         review_html=f'<div class="chapter-list">{review_nav}</div>',
         questions_json=json.dumps(questions_data, ensure_ascii=False),
     )
-    _write_page(f"{cslug}/index.html", f"{cname} - Exam-Killer", content)
+    _write_page(f"{cslug}/index.html", f"{cname} - Exam-Killer", content, base="..")
 
     # Copy question bank viewer JS
     _write_question_bank_js(cslug)
+
 
 def _build_question_bank_html(cslug: str) -> str:
     return f"""\
@@ -319,8 +370,8 @@ def _build_question_bank_html(cslug: str) -> str:
     </div>
   </div>
 </div>
-<div id="question-list"></div>
-<script src="/assets/js/question-bank-{cslug}.js"></script>"""
+<script src="../assets/js/question-bank-{cslug}.js"></script>"""
+
 
 def _write_question_bank_js(cslug: str):
     """Generate a lightweight question-bank viewer for this course."""
@@ -441,105 +492,59 @@ window.applyFilter = function() {{
 
 loadData();
 }})();"""
-    (SITE_DIR / "assets" / "js" / f"question-bank-{cslug}.js").write_text(js, encoding="utf-8")
+    (SITE_DIR / "assets" / "js" / f"question-bank-{cslug}.js").write_text(
+        js, encoding="utf-8"
+    )
+
 
 def _md_to_html(md: str, course_slug: str) -> str:
     """Convert review-guide markdown to HTML for static display."""
-    # Image path rewriting: images/xxx → /images/{course_slug}/raw/{id}/xxx
-    md = re.sub(r'!\[\]\(images/([^)]+)\)', rf'![](/images/{course_slug}/\1)', md)
-    # Replace LaTeX with katex-tex spans
-    md = re.sub(r'\$\$(.+?)\$\$', r'<span class="katex-tex" data-display="true">\1</span>', md, flags=re.DOTALL)
-    md = re.sub(r'\$(.+?)\$', r'<span class="katex-tex" data-display="false">\1</span>', md)
-    # Simple block-level rendering
-    lines = md.split('\n')
-    html = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        # Headings
-        m = re.match(r'^(#{1,6})\s+(.+)$', line)
-        if m:
-            level = len(m.group(1))
-            html.append(f'<h{level}>{_inline_html(m.group(2))}</h{level}>')
-            i += 1
-            continue
-        # Horizontal rule
-        if re.match(r'^---+\s*$', line):
-            html.append('<hr>')
-            i += 1
-            continue
-        # Blockquote
-        if line.startswith('> '):
-            quote_lines = []
-            while i < len(lines) and lines[i].startswith('> '):
-                quote_lines.append(lines[i][2:])
-                i += 1
-            html.append(f'<blockquote>{_inline_html("<br>".join(quote_lines))}</blockquote>')
-            continue
-        # Code block (```)
-        if line.startswith('```'):
-            lang = line[3:].strip()
-            code_lines = []
-            i += 1
-            while i < len(lines) and not lines[i].startswith('```'):
-                code_lines.append(lines[i])
-                i += 1
-            i += 1  # skip closing ```
-            code = esc_html('\n'.join(code_lines))
-            html.append(f'<pre><code class="language-{lang}">{code}</code></pre>')
-            continue
-        # Blank line -> paragraph separator
-        if line.strip() == '':
-            i += 1
-            continue
-        # Regular paragraph
-        para_lines = []
-        while i < len(lines) and lines[i].strip() != '' and not lines[i].startswith('#') and not lines[i].startswith('```') and not lines[i].startswith('> '):
-            para_lines.append(lines[i])
-            i += 1
-        if para_lines:
-            text = _inline_html('<br>'.join(para_lines))
-            html.append(f'<p>{text}</p>')
-    return '\n'.join(html)
+    # Image path rewriting: images/xxx → ../../images/xxx (from review-guide subdir)
+    md = re.sub(r"!\[\]\(images/([^)]+)\)", r"![](../../images/\1)", md)
+
 
 def _inline_html(text: str) -> str:
     """Convert inline formatting."""
     text = esc_html(text)
-    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
-    text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
     return text
 
+
 def copy_images():
-    """Copy question images to _site/images/."""
+    """Copy all question images to _site/images/ (flat, keyed by filename)."""
     img_dir = SITE_DIR / "images"
     img_dir.mkdir(exist_ok=True)
-    raw_base = Path(str(DATA_DIR))
     count = 0
-    for raw_dir in raw_base.rglob("raw/*"):
-        if not raw_dir.is_dir():
+    seen = set()
+    for course_dir in Path(str(DATA_DIR)).iterdir():
+        if not course_dir.is_dir():
             continue
-        images_path = raw_dir / "images"
-        if images_path.exists():
-            for img in images_path.iterdir():
-                if img.is_file():
-                    # Copy with path: images/{course_dir}/raw/{id}/{filename}
-                    parts = img.relative_to(raw_base).parts
-                    dest = img_dir
-                    for p in parts:
-                        dest = dest / p
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(img, dest)
-                    count += 1
+        raw_base = course_dir / "raw"
+        if not raw_base.exists():
+            continue
+        for raw_dir in sorted(raw_base.iterdir()):
+            if not raw_dir.is_dir():
+                continue
+            images_path = raw_dir / "images"
+            if images_path.exists():
+                for img in images_path.iterdir():
+                    if img.is_file() and img.name not in seen:
+                        seen.add(img.name)
+                        shutil.copy2(img, img_dir / img.name)
+                        count += 1
     print(f"Copied {count} images")
 
-def _write_page(path: str, title: str, content: str):
+
+def _write_page(path: str, title: str, content: str, base: str = "."):
     full_path = SITE_DIR / path
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_text(
-        HTML_SHELL.format(title=esc_html(title), content=content),
-        encoding="utf-8"
+        HTML_SHELL.format(title=esc_html(title), content=content, base=base),
+        encoding="utf-8",
     )
     print(f"  {full_path.relative_to(SITE_DIR)}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export exam-killer to static site")
