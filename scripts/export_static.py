@@ -494,8 +494,70 @@ if (document.readyState === \"loading\") {{
 
 def _md_to_html(md: str, course_slug: str) -> str:
     """Convert review-guide markdown to HTML for static display."""
-    # Image path rewriting: images/xxx → ../../images/xxx (from review-guide subdir)
     md = re.sub(r"!\[\]\(images/([^)]+)\)", r"![](../../images/\1)", md)
+    md = re.sub(
+        r"\$\$(.+?)\$\$",
+        r'<span class="katex-tex" data-display="true">\1</span>',
+        md,
+        flags=re.DOTALL,
+    )
+    md = re.sub(
+        r"\$(.+?)\$", r'<span class="katex-tex" data-display="false">\1</span>', md
+    )
+    lines = md.split("\n")
+    html = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if m:
+            level = len(m.group(1))
+            html.append(f"<h{level}>{_inline_html(m.group(2))}</h{level}>")
+            i += 1
+            continue
+        if re.match(r"^---+\s*$", line):
+            html.append("<hr>")
+            i += 1
+            continue
+        if line.startswith("> "):
+            quote_lines = []
+            while i < len(lines) and lines[i].startswith("> "):
+                quote_lines.append(lines[i][2:])
+                i += 1
+            html.append(
+                f'<blockquote>{_inline_html("<br>".join(quote_lines))}</blockquote>'
+            )
+            continue
+        if line.startswith("```"):
+            code_lines = []
+            i += 1
+            while i < len(lines) and not lines[i].startswith("```"):
+                code_lines.append(lines[i])
+                i += 1
+            i += 1
+            code = esc_html("\n".join(code_lines))
+            lang = re.match(r"```(\w*)", line)
+            html.append(
+                f'<pre><code class="language-{lang.group(1) or ""}">{code}</code></pre>'
+            )
+            continue
+        if line.strip() == "":
+            i += 1
+            continue
+        para_lines = []
+        while (
+            i < len(lines)
+            and lines[i].strip() != ""
+            and not lines[i].startswith("#")
+            and not lines[i].startswith("```")
+            and not lines[i].startswith("> ")
+        ):
+            para_lines.append(lines[i])
+            i += 1
+        if para_lines:
+            text = _inline_html("<br>".join(para_lines))
+            html.append(f"<p>{text}</p>")
+    return "\n".join(html)
 
 
 def _inline_html(text: str) -> str:
