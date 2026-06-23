@@ -370,6 +370,7 @@ def _build_question_bank_html(cslug: str) -> str:
     </div>
   </div>
 </div>
+<div id="question-list"></div>
 <script src="../assets/js/question-bank-{cslug}.js"></script>"""
 
 
