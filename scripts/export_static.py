@@ -333,7 +333,8 @@ def export_course(db, course):
         if review_html_parts
         else '<p class="text-muted">暂无复习指南</p>'
     )
-    bank_html = _build_question_bank_html(cslug)
+    bank_js = _write_question_bank_js(cslug)
+    bank_html = _build_question_bank_html(cslug, bank_js)
     content = COURSE_INDEX.format(
         course_name=esc_html(cname),
         bank_html=bank_html,
@@ -342,11 +343,8 @@ def export_course(db, course):
     )
     _write_page(f"{cslug}/index.html", f"{cname} - Exam-Killer", content, base="..")
 
-    # Copy question bank viewer JS
-    _write_question_bank_js(cslug)
 
-
-def _build_question_bank_html(cslug: str) -> str:
+def _build_question_bank_html(cslug: str, js_content: str) -> str:
     return f"""\
 <div class="filter-bar">
   <div class="filter-row">
@@ -371,7 +369,7 @@ def _build_question_bank_html(cslug: str) -> str:
   </div>
 </div>
 <div id="question-list"></div>
-<script src="../assets/js/question-bank-{cslug}.js"></script>"""
+<script>{js_content}</script>"""
 
 
 def _write_question_bank_js(cslug: str):
@@ -498,9 +496,7 @@ if (document.readyState === \"loading\") {{
 }}
 }})();
 """
-    (SITE_DIR / "assets" / "js" / f"question-bank-{cslug}.js").write_text(
-        js, encoding="utf-8"
-    )
+    return js
 
 
 def _md_to_html(md: str, course_slug: str) -> str:
