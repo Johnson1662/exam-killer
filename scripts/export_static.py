@@ -465,10 +465,7 @@ function render() {{
     return '<div class=\\"question-card\\">' +
       '<div class=\\"flex justify-between items-center mb-2\\"><span class=\\"qtype-badge\\">' + typeLabel(q.qtype) + '</span><span class=\\"text-muted\\" style=\\"font-size:12px;font-weight:600;opacity:0.5;\\">' + q.qid + '</span></div>' +
       '<div class=\\"question-content\\">' + contentHtml + '</div>' +
-      '<button class=\\"btn btn-sm btn-secondary toggle-answer\\" onclick=\\"this.nextElementSibling.classList.toggle(\\'open\\');this.textContent=this.nextElementSibling.classList.contains(\\'open\\')?'隐藏解析':'显示解析'\\">显示解析</button>' +
-      '<div class=\\"answer-section\\"><h4>答案</h4><p>' + (q.answer || '(无答案)') + '</p>' +
-      (q.explanation ? '<h4>解析</h4><p>' + q.explanation + '</p>' : '') + '</div>' +
-      '</div>';
+      '<button class=\"btn btn-sm btn-secondary toggle-answer\" onclick=\"var p=this.nextElementSibling;p.classList.toggle(\'open\');this.textContent=p.classList.contains(\'open\')?\'显示解析\':\'隐藏解析\'\">显示解析</button>' +
   }}).join('');
   // Re-render KaTeX
   renderKatex();
