@@ -82,8 +82,9 @@ COURSE_INDEX = """\
 <div id="tab-review" class="tab-content" style="display:none;">{review_html}</div>
 <script>
 var _questions = {questions_json};
+var _allChapters = {chapters_json};
+var _allTags = {tags_json};
 function showTab(name) {{
-  document.querySelectorAll('.tab-content').forEach(function(el) {{ el.style.display = 'none'; }});
   document.getElementById('tab-' + name).style.display = '';
   document.querySelectorAll('.tab').forEach(function(el) {{ el.classList.remove('active'); }});
   document.querySelector('.tab[onclick*=\"' + name + '\"]').classList.add('active');
@@ -340,6 +341,8 @@ def export_course(db, course):
         bank_html=bank_html,
         review_html=f'<div class="chapter-list">{review_nav}</div>',
         questions_json=json.dumps(questions_data, ensure_ascii=False),
+        chapters_json=json.dumps(chapters, ensure_ascii=False),
+        tags_json=json.dumps(tags, ensure_ascii=False),
     )
     _write_page(f"{cslug}/index.html", f"{cname} - Exam-Killer", content, base="..")
 
@@ -382,23 +385,12 @@ var allTags = [];
 var selectedTag = null;
 
 function loadData() {{
-  Promise.all([
-    fetch('questions.json').then(function(r) {{ if (!r.ok) throw new Error('questions.json ' + r.status); return r.json(); }}),
-    fetch('chapters.json').then(function(r) {{ if (!r.ok) throw new Error('chapters.json ' + r.status); return r.json(); }}),
-    fetch('tags.json').then(function(r) {{ if (!r.ok) throw new Error('tags.json ' + r.status); return r.json(); }})
-  ]).then(function(results) {{
-    allQuestions = results[0];
-    allChapters = results[1];
-    allTags = results[2];
-    buildFilters();
-    render();
-  }}).catch(function(err) {{
-    console.error('QuestionBank load error:', err);
-    var el = document.getElementById('question-list');
-    if (el) el.innerHTML = '<div class=\"empty-state\"><h3>加载失败</h3><p>' + err.message + '</p></div>';
-  }});
+  allQuestions = typeof _questions !== 'undefined' ? _questions : [];
+  allChapters = typeof _allChapters !== 'undefined' ? _allChapters : [];
+  allTags = typeof _allTags !== 'undefined' ? _allTags : [];
+  buildFilters();
+  render();
 }}
-
 function typeLabel(t) {{
   var map = {{ single_choice:'单选题', multiple_choice:'多选题', fill_blank:'填空题', true_false:'判断题', short_answer:'简答题', calculation:'计算题', proof:'证明题', essay:'论述题' }};
   return map[t] || t;
