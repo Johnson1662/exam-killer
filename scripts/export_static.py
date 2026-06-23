@@ -381,8 +381,8 @@ def _write_question_bank_js(cslug: str):
     """Generate a lightweight question-bank viewer for this course."""
     js = f"""\
 (function(){{
+console.log('question-bank script started');
 var allQuestions = [];
-var allChapters = [];
 var allTags = [];
 var selectedTag = null;
 
