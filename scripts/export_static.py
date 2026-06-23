@@ -90,7 +90,8 @@ function showTab(name) {{
 }}
 </script>
 <div id="tab-bank" class="tab-content">{bank_html}</div>
-<div id="tab-review" class="tab-content" style="display:none;">{review_html}</div>"""
+<div id="tab-review" class="tab-content" style="display:none;">{review_html}</div>
+<script>{bank_js}</script>"""
 
 # ── data reading ─────────────────────────────────────────────────────
 
@@ -340,6 +341,7 @@ def export_course(db, course):
     content = COURSE_INDEX.format(
         course_name=esc_html(cname),
         bank_html=bank_html,
+        bank_js=bank_js,
         review_html=f'<div class="chapter-list">{review_nav}</div>',
         questions_json=json.dumps(questions_data, ensure_ascii=False),
         chapters_json=json.dumps(chapters, ensure_ascii=False),
@@ -372,8 +374,7 @@ def _build_question_bank_html(cslug: str, js_content: str) -> str:
     </div>
   </div>
 </div>
-<div id="question-list"></div>
-<script>{js_content}</script>"""
+<div id="question-list"></div>"""
 
 
 def _write_question_bank_js(cslug: str):
