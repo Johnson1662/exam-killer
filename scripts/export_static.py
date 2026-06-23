@@ -486,13 +486,13 @@ function renderKatex() {{
   }});
 }}
 
-window.applyFilter = function() {{
-  renderTags();
-  render();
-}};
-
-loadData();
-}})();"""
+// Wait for DOM to be ready
+if (document.readyState === \"loading\") {{
+  document.addEventListener(\"DOMContentLoaded\", loadData);
+}} else {{
+  loadData();
+}}
+"""
     (SITE_DIR / "assets" / "js" / f"question-bank-{cslug}.js").write_text(
         js, encoding="utf-8"
     )
