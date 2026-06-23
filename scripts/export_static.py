@@ -467,6 +467,9 @@ function render() {{
       '<div class=\\"flex justify-between items-center mb-2\\"><span class=\\"qtype-badge\\">' + typeLabel(q.qtype) + '</span><span class=\\"text-muted\\" style=\\"font-size:12px;font-weight:600;opacity:0.5;\\">' + q.qid + '</span></div>' +
       '<div class=\\"question-content\\">' + contentHtml + '</div>' +
       '<button class=\"btn btn-sm btn-secondary toggle-answer\" onclick=\"var p=this.nextElementSibling;p.classList.toggle(\\'open\\');this.textContent=p.classList.contains(\\'open\\')?\\'\u663E\u793A\u89E3\u6790\\':\\'\u9690\u85CF\u89E3\u6790\\'\">\u663E\u793A\u89E3\u6790</button>' +
+      '<div class=\\"answer-section\\"><h4>\u7B54\u6848</h4><p>' + (q.answer || '(\u65E0\u7B54\u6848)') + '</p>' +
+      (q.explanation ? '<h4>\u89E3\u6790</h4><p>' + q.explanation + '</p>' : '') + '</div>' +
+      '</div>'
   }}).join('');
   // Re-render KaTeX
   renderKatex();
