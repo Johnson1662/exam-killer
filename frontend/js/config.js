@@ -8,6 +8,12 @@ async function fetchDefaults() {
     const cfg = await API.get('/api/config');
     DEFAULT_LLM.endpoint = cfg.llm_endpoint || DEFAULT_LLM.endpoint;
     DEFAULT_LLM.model = cfg.llm_model || DEFAULT_LLM.model;
+    // Read-only mode: hide mutation UI
+    if (cfg.read_only) {
+      var s = document.createElement('style');
+      s.textContent = '.upload-tab,.edit-q,.save-q,.cancel-q,.delete-q,#btn-delete-course,#btn-export-rg,.topbar-link[href$="/settings"]{display:none!important}';
+      document.head.appendChild(s);
+    }
   } catch (_) {}
 }
 

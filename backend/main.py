@@ -1,11 +1,12 @@
 """FastAPI entry-point."""
 
 import io
+import os
 import zipfile
 from pathlib import Path
 import logging
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import DATA_DIR, DB_PATH, DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_MODEL
@@ -16,9 +17,22 @@ from backend.routes.questions import router as questions_router
 from backend.routes.review import router as review_router
 
 from backend.routes.llm_models import router as llm_models_router
+
 app = FastAPI(title="Exam-Killer", version="0.1.0")
 
+# ── Read-only mode ───────────────────────────────────────────────────
+READ_ONLY = os.environ.get("EXAM_READ_ONLY", "").lower() in ("1", "true", "yes")
+
+
+@app.middleware("http")
+async def read_only_middleware(request: Request, call_next):
+    if READ_ONLY and request.method in ("POST", "PUT", "DELETE"):
+        return Response(status_code=403, content='{"detail":"Read-only mode"}')
+    return await call_next(request)
+
+
 # ── Lifecycle ────────────────────────────────────────────────────────
+
 
 @app.on_event("startup")
 async def startup():
@@ -40,17 +54,19 @@ app.include_router(review_router)
 
 # ── Client config ────────────────────────────────────────────────────
 
+
 @app.get("/api/config")
 async def client_config():
-    """Return default provider config for frontend."""
     return {
-        "llm_endpoint": DEFAULT_LLM_ENDPOINT,
-        "llm_model": DEFAULT_LLM_MODEL,
-        "llm_key_configured": False,  # frontend reads this to know if user needs to fill key
+        "llm_endpoint": DEFAULT_LLM_ENDPOINT if not READ_ONLY else "",
+        "llm_model": DEFAULT_LLM_MODEL if not READ_ONLY else "",
+        "llm_key_configured": False,
+        "read_only": READ_ONLY,
     }
 
 
 # ── Static file proxy for assets and frontend ────────────────────────
+
 
 @app.get("/api/assets/{dir_name}/images/{filename}")
 async def serve_asset(dir_name: str, filename: str):
@@ -58,7 +74,9 @@ async def serve_asset(dir_name: str, filename: str):
     # Primary: assets dir
     asset_path = DATA_DIR / dir_name / "assets" / filename
     if asset_path.exists():
-        return Response(content=asset_path.read_bytes(), media_type=_infer_mime(filename))
+        return Response(
+            content=asset_path.read_bytes(), media_type=_infer_mime(filename)
+        )
 
     # Fallback: search raw/{id}/images/
     raw_base = DATA_DIR / dir_name / "raw"
@@ -66,7 +84,9 @@ async def serve_asset(dir_name: str, filename: str):
         for raw_dir in sorted(raw_base.iterdir()):
             img = raw_dir / "images" / filename
             if img.exists():
-                return Response(content=img.read_bytes(), media_type=_infer_mime(filename))
+                return Response(
+                    content=img.read_bytes(), media_type=_infer_mime(filename)
+                )
 
     raise HTTPException(404, "Image not found")
 
@@ -83,6 +103,7 @@ def _infer_mime(name: str) -> str:
 
 
 # ── Export endpoints ─────────────────────────────────────────────────
+
 
 @app.get("/api/courses/{course_id}/export/md")
 async def export_md(course_id: int, scope: str = "review-guide"):
@@ -130,7 +151,9 @@ async def serve_frontend(path: str = ""):
         raise HTTPException(404, "Not found")
 
     if file_path.exists() and file_path.is_file():
-        return Response(content=file_path.read_bytes(), media_type=_mime_from_ext(file_path.suffix))
+        return Response(
+            content=file_path.read_bytes(), media_type=_mime_from_ext(file_path.suffix)
+        )
 
     # Fallback to index.html for SPA
     index_path = FRONTEND_DIR / "index.html"
