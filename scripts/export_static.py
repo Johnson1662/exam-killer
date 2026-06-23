@@ -385,15 +385,19 @@ var selectedTag = null;
 
 function loadData() {{
   Promise.all([
-    fetch('questions.json').then(function(r) {{ return r.json(); }}),
-    fetch('chapters.json').then(function(r) {{ return r.json(); }}),
-    fetch('tags.json').then(function(r) {{ return r.json(); }})
+    fetch('questions.json').then(function(r) {{ if (!r.ok) throw new Error('questions.json ' + r.status); return r.json(); }}),
+    fetch('chapters.json').then(function(r) {{ if (!r.ok) throw new Error('chapters.json ' + r.status); return r.json(); }}),
+    fetch('tags.json').then(function(r) {{ if (!r.ok) throw new Error('tags.json ' + r.status); return r.json(); }})
   ]).then(function(results) {{
     allQuestions = results[0];
     allChapters = results[1];
     allTags = results[2];
     buildFilters();
     render();
+  }}).catch(function(err) {{
+    console.error('QuestionBank load error:', err);
+    var el = document.getElementById('question-list');
+    if (el) el.innerHTML = '<div class=\"empty-state\"><h3>加载失败</h3><p>' + err.message + '</p></div>';
   }});
 }}
 
@@ -492,6 +496,7 @@ if (document.readyState === \"loading\") {{
 }} else {{
   loadData();
 }}
+}})();
 """
     (SITE_DIR / "assets" / "js" / f"question-bank-{cslug}.js").write_text(
         js, encoding="utf-8"
